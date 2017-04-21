@@ -1,7 +1,7 @@
 What? Hacky tool that makes active monitor follow mouse.
 
 
-Why? New windows will always appear on the monitor with the mouse.
+Why? New windows will always appear on the monitor you are looking on.
 
 
 Usage? Compile and run as user.
