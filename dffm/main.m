@@ -9,29 +9,50 @@
 #import <Foundation/Foundation.h>
 #import <Cocoa/Cocoa.h>
 
-int display_n(CGPoint p) {
-    int screen_n = 0;
-    CGFloat combined_offset = 0.0;
-    for (NSScreen *screen in [NSScreen screens]) {
-        combined_offset += screen.visibleFrame.size.width;
-        if (p.x < combined_offset) {
-            break;
-        }
+static CGRect MAIN_DISPLAY;
+static CGRect DISPLAYS[6];
+static NSUInteger DISPLAYS_N = 0;
 
-        screen_n++;
-    }
-    return screen_n;
+CGPoint display_click_location(NSRect rect) {
+    // should point to nothing on menubar
+    CGFloat magicX = rect.origin.x + rect.size.width / 3 * 1.7;
+
+    // convert from NS to CG
+    CGFloat cgY = MAIN_DISPLAY.size.height - rect.origin.y - rect.size.height;
+    
+    return CGPointMake(magicX, cgY);
 }
 
-void switch_to_display_n_2(int n) {
+void setup() {
+    MAIN_DISPLAY = NSRectToCGRect([NSScreen mainScreen].frame);
+
+    int i = 0;
+    for (NSScreen *screen in [NSScreen screens]) {
+        DISPLAYS[i++] = NSRectToCGRect(screen.frame);
+        DISPLAYS_N++;
+    }
+}
+
+int display_n(CGPoint p) {
+    for (int i = 0; i < DISPLAYS_N; i++) {
+        // we can ignore CG-NS coordinates mess up cause we only need to check X
+        if (NSPointInRect(p, DISPLAYS[i])) {
+            return i;
+        }
+    }
+
+    return 0;
+}
+
+void switch_to_display_n(int n) {
     CGEventRef null_event = CGEventCreate(NULL);
 
-    CGPoint origLocation = CGEventGetLocation(null_event);
-    CGPoint clickLocation = CGPointMake(1920 / 3 * 2 + 1920 * n, 0);
+    CGPoint orig_location = CGEventGetLocation(null_event);
+    CGPoint click_location = display_click_location(DISPLAYS[n]);
 
-    CGEventRef click_down = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseDown, clickLocation, kCGMouseButtonLeft);
-    CGEventRef click_up = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseUp, clickLocation, kCGMouseButtonLeft);
-    CGEventRef back_move = CGEventCreateMouseEvent(NULL, kCGEventMouseMoved, origLocation, kCGMouseButtonCenter);
+    CGEventRef click_down = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseDown, click_location, kCGMouseButtonLeft);
+    CGEventRef click_up = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseUp, click_location, kCGMouseButtonLeft);
+    CGEventRef back_move = CGEventCreateMouseEvent(NULL, kCGEventMouseMoved, orig_location, kCGMouseButtonCenter);
 
     CGEventPost(kCGHIDEventTap, click_down);
     CGEventPost(kCGHIDEventTap, click_up);
@@ -43,30 +64,28 @@ void switch_to_display_n_2(int n) {
     CFRelease(null_event);
 }
 
-CGPoint previousLocation = { x: 0, y: 0 };
-CGEventRef tap_callback(CGEventTapProxy proxy, CGEventType type, CGEventRef ref, void *refcon) {
-    CGPoint currentLocation = CGEventGetLocation(ref);
+CGEventRef tap_callback(CGEventTapProxy proxy, CGEventType type, CGEventRef ref, void *ctx) {
+    CGPoint current_location = CGEventGetLocation(ref);
+    CGPoint *previous_location = (CGPoint *) ctx;
 
     int current_display = -1;
-    if ((current_display = display_n(currentLocation)) != display_n(previousLocation)) {
-        switch_to_display_n_2(current_display);
+    if ((current_display = display_n(current_location)) != display_n(*previous_location)) {
+        switch_to_display_n(current_display);
     }
 
-    previousLocation = currentLocation;
+    *previous_location = current_location;
     return ref;
 }
 
 int main(int argc, const char * argv[]) {
-    CFMachPortRef tap_ref = CGEventTapCreate(kCGHIDEventTap, kCGHeadInsertEventTap, kCGEventTapOptionListenOnly, CGEventMaskBit(kCGEventMouseMoved), tap_callback, nil);
+    CGPoint previous_location = CGEventGetLocation(CGEventCreate(NULL));
+    CFMachPortRef tap_ref = CGEventTapCreate(kCGHIDEventTap, kCGHeadInsertEventTap, kCGEventTapOptionListenOnly, CGEventMaskBit(kCGEventMouseMoved), tap_callback, &previous_location);
     CFRunLoopSourceRef tap_source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap_ref, 0);
 
     CFRunLoopAddSource(CFRunLoopGetCurrent(), tap_source, kCFRunLoopCommonModes);
     CGEventTapEnable(tap_ref, true);
 
-    CGEventRef null_event = CGEventCreate(NULL);
-    previousLocation = CGEventGetLocation(null_event);
-    CFRelease(null_event);
-
+    setup();
     CFRunLoopRun();
     return 0;
 }
